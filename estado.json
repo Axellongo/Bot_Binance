@@ -6,7 +6,7 @@
     "precio_max_operado": 0,
     "precio_min_operado": 0,
     "comisiones": 0,
-    "precio_max_crypto": 95002.93,
+    "precio_max_crypto": 97122.65,
     "precio_min_crypto": 0,
-    "enviar_resumen": true
+    "enviar_resumen": false
 }
