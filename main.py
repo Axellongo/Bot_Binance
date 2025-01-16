@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 from alertas import enviar_alerta
 from simulacion import backtest
+from registro_operaciones import registrar_operacion, inicializar_registro
 import time  # Agregado al principio del archivo
 from binance_client import inicializar_cliente_binance, obtener_datos_mercado
 from ccxt import binance
@@ -86,20 +87,41 @@ def comprar(cliente, par_trading, cantidad):
         print(f"Error al realizar compra: {e}")
         return None
 
-def vender(cliente, par_trading, cantidad):
+def calcular_riesgo_recompensa(precio_entrada, precio_stop_loss, precio_objetivo):
     """
-    Realiza una orden de venta de mercado o la simula si está en modo simulación.
+    Calcula la relación riesgo/recompensa.
     """
-    if MODO_SIMULACION:
-        print(f"[SIMULACIÓN] Venta simulada: {cantidad} {par_trading}")
-        return {"status": "simulated", "filled": cantidad, "price": 0}  # Simulación
+    riesgo = precio_entrada - precio_stop_loss
+    recompensa = precio_objetivo - precio_entrada
+    if riesgo <= 0:
+        return float('inf')  # Riesgo nulo o negativo, siempre favorable
+    return recompensa / riesgo
+    
+def calcular_trailing_stop_loss(precio_actual, precio_compra, trailing_percent):
+    """
+    Calcula el precio del trailing stop loss.
+    """
+    stop_loss = precio_actual * (1 - trailing_percent / 100)
+    return max(stop_loss, precio_compra)  # Nunca vender por debajo del precio de compra
+
+
+def vender(cliente, par_trading, cantidad, precio_compra, trailing_percent):
+    """
+    Realiza una orden de venta utilizando trailing stop loss.
+    """
     try:
-        orden = cliente.create_market_sell_order(par_trading, cantidad)
-        print(f"Venta ejecutada: {orden}")
-        return orden
+        ticker = cliente.fetch_ticker(par_trading)
+        precio_actual = ticker['last']
+        precio_stop_loss = calcular_trailing_stop_loss(precio_actual, precio_compra, trailing_percent)
+
+        print(f"Precio actual: {precio_actual}, Precio stop loss: {precio_stop_loss}")
+        if precio_actual <= precio_stop_loss:
+            orden = cliente.create_market_sell_order(par_trading, cantidad)
+            print(f"Venta ejecutada con trailing stop: {orden}")
+            return orden
     except Exception as e:
-        print(f"Error al realizar venta: {e}")
-        return None
+        print(f"Error al realizar venta con trailing stop: {e}")
+    return None
 
 def sincronizar_reloj_binance():
     """
@@ -111,6 +133,22 @@ def sincronizar_reloj_binance():
     print(f"Ajuste de tiempo calculado: {ajuste} ms")
     return ajuste
 
+def mostrar_resumen_tiempo_real(estado):
+    """
+    Muestra un resumen del estado del bot en tiempo real.
+    """
+    print("\n--- Resumen en Tiempo Real ---")
+    print(f"Capital inicial: ${estado['capital_inicial']:.2f}")
+    print(f"Capital actual: ${estado['capital_final']:.2f}")
+    print(f"Ganancia total: ${estado['ganancia_total']:.2f}")
+    print(f"Operaciones realizadas: {estado['operaciones']}")
+    print(f"Precio máximo operado: ${estado['precio_max_operado']:.2f}")
+    print(f"Precio mínimo operado: ${estado['precio_min_operado']:.2f}")
+    print(f"Gasto en comisiones: ${estado['comisiones']:.2f}")
+    print(f"Precio máximo de la criptomoneda: ${estado['precio_max_crypto']:.2f}")
+    print(f"Precio mínimo de la criptomoneda: ${estado['precio_min_crypto']:.2f}")
+    print("-----------------------------\n")
+
 def main():
     try:
         # Cargar el estado
@@ -119,6 +157,8 @@ def main():
         # Verificar si se debe enviar el resumen
         if estado["enviar_resumen"]:
             enviar_resumen_diario()
+
+        mostrar_resumen_tiempo_real(estado)
 
         # Sincronizar reloj con Binance
         ajuste_tiempo = sincronizar_reloj_binance()
@@ -161,6 +201,10 @@ def main():
 
                 # Condición de compra
                 if precio_actual <= tendencia * (1 - MARGEN_COMPRA) and estado["capital_final"] > 0:
+                    riesgo_recompensa = calcular_riesgo_recompensa(precio_actual, precio_stop_loss, precio_objetivo)
+                    if riesgo_recompensa < 2:  # Aseguramos una relación mínima de 2:1
+                        print(f"Relación riesgo/recompensa no favorable: {riesgo_recompensa}")
+                        return
                     cantidad = estado["capital_final"] / precio_actual
                     orden = comprar(cliente, PAR_TRADING, cantidad)
                     if orden:
@@ -168,11 +212,15 @@ def main():
                         estado["operaciones"] += 1
                         estado["precio_max_operado"] = max(estado["precio_max_operado"], precio_actual)
                         estado["precio_min_operado"] = min(estado["precio_min_operado"], precio_actual)
+                        inicializar_registro()
+                        registrar_operacion("COMPRA", PAR_TRADING, cantidad, precio_actual, cantidad*precio_actual*0.001)
 
                 # Condición de venta
                 elif precio_actual >= tendencia * (1 + MARGEN_VENTA) and estado["capital_final"] == 0:
                     cantidad = orden["filled"]  # Cantidad comprada
                     orden = vender(cliente, PAR_TRADING, cantidad)
+                    inicializar_registro()
+                    registrar_operacion("COMPRA", PAR_TRADING, cantidad, precio_actual, cantidad*precio_actual*0.001)
                     if orden:
                         ganancia = cantidad * precio_actual - orden["cost"]
                         estado["capital_final"] = cantidad * precio_actual
