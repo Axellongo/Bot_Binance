@@ -1,9 +1,9 @@
 {
     "capital_inicial": 100,
-    "capital_final": 100,
+    "capital_final": 0,
     "ganancia_total": 0,
-    "operaciones": 0,
-    "precio_max_operado": 0,
+    "operaciones": 1,
+    "precio_max_operado": 12.482,
     "precio_min_operado": 0,
     "comisiones": 0,
     "precio_max_crypto": 97122.65,

@@ -5,6 +5,8 @@ import os
 
 load_dotenv()
 
+MODO_SIMULACION = True  # True para simulación, False para operaciones reales
+
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")

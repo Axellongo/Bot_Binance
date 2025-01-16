@@ -1,13 +1,15 @@
 # main.py
 
-from binance_client import inicializar_cliente_binance, obtener_datos_mercado
 from indicadores import calcular_tendencia, calcular_resistencia
-from config import PAR_TRADING, CAPITAL_INICIAL, MARGEN_COMPRA, MARGEN_VENTA, INTERVALO_ITERACION 
+from config import PAR_TRADING, CAPITAL_INICIAL, MARGEN_COMPRA, MARGEN_VENTA, INTERVALO_ITERACION, MODO_SIMULACION
 import json
 from datetime import datetime
 from alertas import enviar_alerta
 from simulacion import backtest
 import time  # Agregado al principio del archivo
+from binance_client import inicializar_cliente_binance, obtener_datos_mercado
+from ccxt import binance
+
 
 ESTADO_FILE = "estado.json"
 
@@ -71,27 +73,43 @@ def manejar_error(mensaje):
 
 def comprar(cliente, par_trading, cantidad):
     """
-    Realiza una orden de compra de mercado.
+    Realiza una orden de compra de mercado o la simula si está en modo simulación.
     """
+    if MODO_SIMULACION:
+        print(f"[SIMULACIÓN] Compra simulada: {cantidad} {par_trading}")
+        return {"status": "simulated", "filled": cantidad, "price": 0}  # Simulación
     try:
         orden = cliente.create_market_buy_order(par_trading, cantidad)
         print(f"Compra ejecutada: {orden}")
         return orden
     except Exception as e:
-        manejar_error(f"Error al realizar compra: {e}")
+        print(f"Error al realizar compra: {e}")
         return None
 
 def vender(cliente, par_trading, cantidad):
     """
-    Realiza una orden de venta de mercado.
+    Realiza una orden de venta de mercado o la simula si está en modo simulación.
     """
+    if MODO_SIMULACION:
+        print(f"[SIMULACIÓN] Venta simulada: {cantidad} {par_trading}")
+        return {"status": "simulated", "filled": cantidad, "price": 0}  # Simulación
     try:
         orden = cliente.create_market_sell_order(par_trading, cantidad)
         print(f"Venta ejecutada: {orden}")
         return orden
     except Exception as e:
-        manejar_error(f"Error al realizar venta: {e}")
+        print(f"Error al realizar venta: {e}")
         return None
+
+def sincronizar_reloj_binance():
+    """
+    Sincroniza el reloj del cliente con el servidor de Binance.
+    """
+    cliente_temporal = binance()
+    servidor_tiempo = cliente_temporal.fetch_time()  # Obtener la hora del servidor
+    ajuste = servidor_tiempo - int(time.time() * 1000)  # Calcular ajuste de tiempo
+    print(f"Ajuste de tiempo calculado: {ajuste} ms")
+    return ajuste
 
 def main():
     try:
@@ -102,7 +120,17 @@ def main():
         if estado["enviar_resumen"]:
             enviar_resumen_diario()
 
-        cliente = inicializar_cliente_binance()
+        # Sincronizar reloj con Binance
+        ajuste_tiempo = sincronizar_reloj_binance()
+
+        # Inicializar el cliente Binance con ajuste de tiempo
+        cliente = binance({
+            'adjustForTimeDifference': True,  # Ajustar tiempo automáticamente
+            'recvWindow': 5000  # Aumentar el margen de tolerancia de tiempo (opcional)
+        })
+
+        # Aplicar ajuste manual si es necesario
+        cliente.options['fetch_time'] = lambda: int(time.time() * 1000) + ajuste_tiempo
 
         while True:
             try:
